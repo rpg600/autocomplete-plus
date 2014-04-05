@@ -11,7 +11,8 @@ module.exports =
 class AutocompleteView extends SimpleSelectListView
   currentBuffer: null
   wordList: null
-  wordRegex: /\b\w*[a-zA-Z_]\w*\b/g
+  wordLists: []
+  wordRegex: /\b\w*[a-zA-Z_.]\w*\b/g
   originalCursorPosition: null
   aboveCursor: false
   debug: false
@@ -69,6 +70,41 @@ class AutocompleteView extends SimpleSelectListView
     # changing any text
     @editor.on 'cursor-moved', @cursorMoved
 
+    # Other packages can trigger these events
+    @editorView.on 'autocomplete-plus:disable-word-lists', @disableWordLists
+    @editorView.on 'autocomplete-plus:enable-word-lists', @enableWordLists
+
+    @editorView.on 'autocomplete-plus:enable-word-list', @enableWordList
+    @editorView.on 'autocomplete-plus:disable-word-list', @disableWordList
+
+    @editorView.on 'autocomplete-plus:create-word-list', @createWordList
+    @editorView.on 'autocomplete-plus:delete-word-list', @deleteWordList
+
+  createWordList: (e, data) =>
+    if @wordLists[data.name] is undefined
+      @wordLists[data.name] = []
+      @wordLists[data.name]['wordList'] = data.wordList
+      @wordLists[data.name]['enabled'] = true
+      console.log "createWordList"
+      console.log @wordLists
+
+  deleteWordList: (e, data) =>
+    delete @wordList[data.name]
+
+  disableWordList: (e, data) =>
+    @wordLists[data.name]['enabled'] = false
+
+  enableWordList: (e, data) =>
+    @wordLists[data.name]['enabled'] = true
+
+  disableWordLists: =>
+    for wordListName, data of @wordLists
+      @wordLists[wordListName]['enabled'] = false
+
+  enableWordLists: =>
+    for wordListName, data of @wordLists
+      @wordLists[wordListName]['enabled'] = true
+
   ###
    * Return false so that the events don't bubble up to the editor
   ###
@@ -95,7 +131,7 @@ class AutocompleteView extends SimpleSelectListView
   ###
    * Generates the word list from the editor buffer(s)
   ###
-  buildWordList: ->
+  buildWordList: =>
     wordHash = {}
     if atom.config.get('autocomplete-plus.includeCompletionsFromAllBuffers')
       buffers = atom.project.getBuffers()
@@ -129,7 +165,14 @@ class AutocompleteView extends SimpleSelectListView
     ]
     for word in objectKeyBlacklist when word in words
       wordList.push word
-    @wordList = wordList
+
+    if @wordLists['wordListFromBuffer'] is undefined
+      console.log 'init word list from buffer'
+      @wordLists['wordListFromBuffer'] = []
+      @wordLists['wordListFromBuffer']['wordList'] = []
+      @wordLists['wordListFromBuffer']['enabled'] = true
+
+    @wordLists['wordListFromBuffer']['wordList'] = wordList
 
     p.stop()
 
@@ -211,11 +254,15 @@ class AutocompleteView extends SimpleSelectListView
     else
       @cancel()
 
-  findMatchesForWord: (prefix) ->
+  findMatchesForWord: (prefix) =>
     p = new Perf "Finding matches for '#{prefix}'", {@debug}
     p.start()
 
-    words = fuzzaldrin.filter @wordList, prefix
+    words = []
+
+    for wordListName, data of @wordLists
+      if data.enabled is true
+        words = words.concat fuzzaldrin.filter data.wordList, prefix
 
     results = for word in words when word isnt prefix
       {prefix, word}
